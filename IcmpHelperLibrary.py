@@ -10,6 +10,7 @@ from socket import *
 import struct
 import time
 import select
+import sys
 
 
 # #################################################################################################################### #
@@ -67,6 +68,9 @@ class IcmpHelperLibrary:
         __ipTimeout = 30
         __ttl = 255                     # Time to live
 
+        __rtt = 0                       # Round trip time
+        __packetIsLost = False            # Flag packet loss
+
         __DEBUG_IcmpPacket = False      # Allows for debug output
 
         # ############################################################################################################ #
@@ -100,6 +104,12 @@ class IcmpHelperLibrary:
         def getTtl(self):
             return self.__ttl
 
+        def getRtt(self):
+            return self.__rtt
+
+        def getPacketIsLost(self):
+            return self.__packetIsLost
+
         # ############################################################################################################ #
         # IcmpPacket Class Setters                                                                                     #
         #                                                                                                              #
@@ -131,6 +141,12 @@ class IcmpHelperLibrary:
 
         def setTtl(self, ttl):
             self.__ttl = ttl
+
+        def setRtt(self, rtt):
+            self.__rtt = rtt
+
+        def setPacketIsLost(self, booleanValue):
+            self.__packetIsLost = booleanValue
 
         # ############################################################################################################ #
         # IcmpPacket Class Private Functions                                                                           #
@@ -208,8 +224,25 @@ class IcmpHelperLibrary:
 
         def __validateIcmpReplyPacketWithOriginalPingData(self, icmpReplyPacket):
             # Hint: Work through comparing each value and identify if this is a valid response.
-            icmpReplyPacket.setIsValidResponse(True)
-            pass
+            if self.getPacketIdentifier() == icmpReplyPacket.getIcmpIdentifier():
+                icmpReplyPacket.setIcmpIdentifier_isValid(True)
+            print("{}{}".format("Identifier sent: ", self.getPacketIdentifier())) if self.__DEBUG_IcmpPacket else 0
+            print("{}{}".format("Identifier received: ", icmpReplyPacket.getIcmpIdentifier())) if self.__DEBUG_IcmpPacket else 0
+
+            if self.getPacketSequenceNumber() == icmpReplyPacket.getIcmpSequenceNumber():
+                icmpReplyPacket.setIcmpSequenceNumber_isValid(True)
+            print("{}{}".format("Sequence Number sent: ", self.getPacketSequenceNumber())) if self.__DEBUG_IcmpPacket else 0
+            print("{}{}".format("Sequence Number received: ", icmpReplyPacket.getIcmpSequenceNumber())) if self.__DEBUG_IcmpPacket else 0
+
+            if self.getDataRaw() == icmpReplyPacket.getIcmpData():
+                icmpReplyPacket.setIcmpData_isValid(True)
+            print("{}{}".format("Raw Data sent: ", self.getDataRaw())) if self.__DEBUG_IcmpPacket else 0
+            print("{}{}".format("Raw Data received: ", icmpReplyPacket.getIcmpData())) if self.__DEBUG_IcmpPacket else 0
+           
+
+            if icmpReplyPacket.getIcmpIdentifier_isValid() and icmpReplyPacket.getIcmpSequenceNumber_isValid() and icmpReplyPacket.getIcmpData_isValid():
+                icmpReplyPacket.setIsValidResponse(True)
+            #pass
 
         # ############################################################################################################ #
         # IcmpPacket Class Public Functions                                                                            #
@@ -250,8 +283,11 @@ class IcmpHelperLibrary:
                 # addr  - address of socket sending data
                 timeReceived = time.time()
                 timeLeft = timeLeft - howLongInSelect
+                
+
                 if timeLeft <= 0:
                     print("  *        *        *        *        *    Request timed out (By no remaining time left).")
+
 
                 else:
                     # Fetch the ICMP type and code from the received packet
@@ -268,6 +304,9 @@ class IcmpHelperLibrary:
                                 )
                               )
 
+                        # raise the packetIsLost flag
+                        self.setPacketIsLost(True)
+
                     elif icmpType == 3:                         # Destination Unreachable
                         print("  TTL=%d    RTT=%.0f ms    Type=%d    Code=%d    %s" %
                                   (
@@ -278,11 +317,37 @@ class IcmpHelperLibrary:
                                       addr[0]
                                   )
                               )
+                        # raise the packetIsLost flag
+                        self.setPacketIsLost(True)
+
+
+                        # Parse the error codes 0, 3, 11, and 12
+                        if icmpCode == 0:
+                            print("Destination Unreachable: Net Unreachable")
+                        if icmpCode == 3:
+                            print("Destination Unreachable: Port Unreachable")
+                        if icmpCode == 11:
+                            print("Destination Unreachable: Destination Network Unreachable for type of service")
+                        if icmpCode == 12:
+                            print("Destination Unreachable: Destination Host Unreachable for Type of Service")
+
+                        # method2 to Parse the error codes for Python 3.0
+                        # match icmpCode
+                        #   case 0:
+                        #       print("Destination Unreachable: Net Unreachable")
+                        #   case 3:
+                        #       print("Destination Unreachable: Port Unreachable")
+                        #   case 11:
+                        #        print("Destination Unreachable: Destination Nutwork Unreachable for type of service")
+                        #   case 12:
+                        #       print("Destination Unreachable: Destination Host Unreachable for Type of Service")
+
+
 
                     elif icmpType == 0:                         # Echo Reply
                         icmpReplyPacket = IcmpHelperLibrary.IcmpPacket_EchoReply(recvPacket)
                         self.__validateIcmpReplyPacketWithOriginalPingData(icmpReplyPacket)
-                        icmpReplyPacket.printResultToConsole(self.getTtl(), timeReceived, addr)
+                        icmpReplyPacket.printResultToConsole(self.getTtl(), timeReceived, addr, self)
                         return      # Echo reply is the end and therefore should return
 
                     else:
@@ -333,6 +398,9 @@ class IcmpHelperLibrary:
         # ############################################################################################################ #
         __recvPacket = b''
         __isValidResponse = False
+        __icmpIdentifier_isValid = False
+        __icmpSequenceNumber_isValid = False
+        __icmpData_isValid = False
 
         # ############################################################################################################ #
         # IcmpPacket_EchoReply Constructors                                                                            #
@@ -403,6 +471,15 @@ class IcmpHelperLibrary:
         def isValidResponse(self):
             return self.__isValidResponse
 
+        def getIcmpIdentifier_isValid(self):
+            return self.__icmpIdentifier_isValid
+
+        def getIcmpSequenceNumber_isValid(self):
+            return self.__icmpSequenceNumber_isValid
+
+        def getIcmpData_isValid(self):
+            return self.__icmpData_isValid
+
         # ############################################################################################################ #
         # IcmpPacket_EchoReply Setters                                                                                 #
         #                                                                                                              #
@@ -412,6 +489,15 @@ class IcmpHelperLibrary:
         # ############################################################################################################ #
         def setIsValidResponse(self, booleanValue):
             self.__isValidResponse = booleanValue
+
+        def setIcmpIdentifier_isValid(self, booleanValue):
+            self.__icmpIdentifier_isValid = booleanValue
+
+        def setIcmpSequenceNumber_isValid(self, booleanValue):
+            self.__icmpSequenceNumber_isValid = booleanValue
+
+        def setIcmpData_isValid(self, booleanValue):
+            self.__icmpData_isValid = booleanValue
 
         # ############################################################################################################ #
         # IcmpPacket_EchoReply Private Functions                                                                       #
@@ -431,9 +517,13 @@ class IcmpHelperLibrary:
         #                                                                                                              #
         #                                                                                                              #
         # ############################################################################################################ #
-        def printResultToConsole(self, ttl, timeReceived, addr):
+        def printResultToConsole(self, ttl, timeReceived, addr, icmpPacket):
             bytes = struct.calcsize("d")
             timeSent = struct.unpack("d", self.__recvPacket[28:28 + bytes])[0]
+
+            roundTripTime =  round((timeReceived - timeSent) * 1000)
+            icmpPacket.setRtt(roundTripTime)
+
             print("  TTL=%d    RTT=%.0f ms    Type=%d    Code=%d        Identifier=%d    Sequence Number=%d    %s" %
                   (
                       ttl,
@@ -445,6 +535,21 @@ class IcmpHelperLibrary:
                       addr[0]
                   )
                  )
+
+            if not self.getIcmpIdentifier_isValid():
+                print("Error: Icmp Packet has wrong identifier")
+                print("{}{}".format("Identifier sent: ", icmpPacket.getPacketIdentifier()))
+                print("{}{}".format("Identifier received: ", self.getIcmpIdentifier()))
+
+            if not self.getIcmpSequenceNumber_isValid():
+                print("Error: Icmp Packet has wrong sequence number")
+                print("{}{}".format("Sequence Number sent: ", icmpPacket.getPacketSequenceNumber()))
+                print("{}{}".format("Sequence Number received: ", self.getIcmpSequenceNumber()))
+
+            if not self.getIcmpData_isValid():
+                print("Error: Icmp Packet has wrong data")
+                print("{}{}".format("Raw Data sent: ", icmpPacket.getDataRaw()))
+                print("{}{}".format("Raw Data received: ", self.getIcmpData()))
 
     # ################################################################################################################ #
     # Class IcmpHelperLibrary                                                                                          #
@@ -472,8 +577,11 @@ class IcmpHelperLibrary:
     # ################################################################################################################ #
     def __sendIcmpEchoRequest(self, host):
         print("sendIcmpEchoRequest Started...") if self.__DEBUG_IcmpHelperLibrary else 0
+        roundTripTimeList = []
+        numberOfPackets = 4
+        lostPackets = 0
 
-        for i in range(4):
+        for i in range(numberOfPackets):
             # Build packet
             icmpPacket = IcmpHelperLibrary.IcmpPacket()
 
@@ -487,9 +595,38 @@ class IcmpHelperLibrary:
             icmpPacket.setIcmpTarget(host)
             icmpPacket.sendEchoRequest()                                                # Build IP
 
+            # record each of the rtt in an array or a list
+            roundTripTimeList.append(icmpPacket.getRtt())
+
+            # increment number of lost packet if packet is lost
+            if icmpPacket.getPacketIsLost():
+                lostPackets += 1
+
+
             icmpPacket.printIcmpPacketHeader_hex() if self.__DEBUG_IcmpHelperLibrary else 0
             icmpPacket.printIcmpPacket_hex() if self.__DEBUG_IcmpHelperLibrary else 0
+
+
             # we should be confirming values are correct, such as identifier and sequence number and data
+
+        # calculate the the Min, Max, and Average rrt
+        roundTripTimeList.sort()
+        minRtt = round(roundTripTimeList[0])
+        maxRtt = round(roundTripTimeList[-1])
+        avgRtt = round(sum(roundTripTimeList) / len(roundTripTimeList)) 
+
+        # calculate the packet loss rate  lost/numberOfPackets
+        packetLossRate = round (lostPackets/ numberOfPackets, 2)
+
+        # print packet loss rate
+        print("Packets: Sent = {}, Received = {}, Lost = {} ({} % loss)".format(numberOfPackets, numberOfPackets-lostPackets, lostPackets, round(packetLossRate * 100)))
+
+
+        # print out the round trip time
+        print("Approximate round trip times in milli-seconds:")
+        print("Minimum = {}ms, Maximum = {}ms, Average = {}ms".format(minRtt, maxRtt, avgRtt))
+
+        # print the packet loss rate
 
     def __sendIcmpTraceRoute(self, host):
         print("sendIcmpTraceRoute Started...") if self.__DEBUG_IcmpHelperLibrary else 0
@@ -527,11 +664,13 @@ def main():
 
 
     # Choose one of the following by uncommenting out the line
-    icmpHelperPing.sendPing("209.233.126.254")
-    icmpHelperPing.sendPing("www.google.com")
-    icmpHelperPing.sendPing("oregonstate.edu")
-    icmpHelperPing.sendPing("gaia.cs.umass.edu")
+    #icmpHelperPing.sendPing("209.233.126.254")
+    #icmpHelperPing.sendPing("www.google.com")
+    #icmpHelperPing.sendPing("oregonstate.edu")
+    #icmpHelperPing.sendPing("gaia.cs.umass.edu")
     #icmpHelperPing.traceRoute("oregonstate.edu")
+
+    icmpHelperPing.sendPing("223.6.6.6")
 
 
 if __name__ == "__main__":
